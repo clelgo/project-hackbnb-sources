@@ -12,10 +12,10 @@ def list_rooms():
    """
    List all available rooms with given category
    """
+   category = request.args.get("category")
 
-   if "category" in request.args:
-      category = request.args["category"]
-      rooms = Room.query.filter(text(f"category = '{category}'")).all()
+   if category:
+      rooms = Room.query.filter_by(category=category).all()
    else:
       rooms = Room.query.all()
 

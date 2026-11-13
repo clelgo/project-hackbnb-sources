@@ -23,6 +23,7 @@ class User(db.Model):
         }
 
     def set_password(self, clear_password: str):
+        #TODO ERREUR MD5
         self.password_hash = md5(clear_password.encode("utf-8")).hexdigest()
     
     def is_valid_password(self, clear_password: str) -> bool:
