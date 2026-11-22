@@ -31,7 +31,6 @@ class Booking(db.Model):
             "departure_date": self.departure_date,
             "guests_count": self.guests_count,
             "total_price": self.total_price,
-            "stripe_checkout_session_id": self.stripe_checkout_session_id,
         }
 
         if self.room:

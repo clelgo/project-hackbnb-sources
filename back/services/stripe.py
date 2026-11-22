@@ -1,6 +1,5 @@
 import os
 import stripe
-import requests
 
 def create_checkout(reference, name, unit_price, quantity):
     """
@@ -40,8 +39,10 @@ def get_checkout_session(checkout_session_id):
 
 
 def get_checkout_lines(checkout_session_id):
-    url = f"https://api.stripe.com/v1/checkout/sessions/{checkout_session_id}/line_items"
-
-    session = requests.Session()
-    session.auth = (os.getenv('STRIPE_API_KEY'), "")
-    return session.get(url).json()["data"]
+    """
+        Retrieve the line items of a Checkout session through the official SDK.
+        The SDK handles authentication and URL-encodes the session ID.
+    """
+    stripe.api_key = os.getenv('STRIPE_API_KEY')
+    line_items = stripe.checkout.Session.list_line_items(checkout_session_id)
+    return [item.to_dict() for item in line_items.data]

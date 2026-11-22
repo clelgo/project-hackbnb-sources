@@ -39,11 +39,15 @@ def get_booking_checkout_lines(reference: str):
     if not booking.is_paid:
         return {'error': 'Cannot get checkout lines without payment'}, 422
 
+    if not booking.stripe_checkout_session_id:
+        return {'error': 'Missing checkout session'}, 422
+
     try:
-        checkout_session_id = request.args.get("checkout_session_id")
-        return jsonify(get_checkout_lines(checkout_session_id))
-    except:
-        return {'error': 'Invalid checkout session ID'}, 404
+        # Never use a session ID supplied by the client: only the one created
+        # for this booking is allowed.
+        return jsonify(get_checkout_lines(booking.stripe_checkout_session_id))
+    except Exception:
+        return {'error': 'Unable to get checkout lines'}, 502
 
 
 @bookings_api.route('/', methods=['POST'])

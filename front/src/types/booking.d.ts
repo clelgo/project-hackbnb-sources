@@ -10,5 +10,4 @@ export type Booking = {
     total_price: number;
     is_paid: boolean;
     room: Room;
-    stripe_checkout_session_id: string;
 }

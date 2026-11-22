@@ -12,7 +12,7 @@ from api.bookings.bookings_models import Booking
 from api.rooms.rooms_models import Room
 from api.users.users_models import User
 from database.init import db
-from services.stripe import create_checkout, get_checkout_session
+from services.stripe import create_checkout, get_checkout_lines, get_checkout_session
 
 
 class FakeCheckoutSession:
@@ -361,3 +361,103 @@ def test_get_checkout_session_retrieves_from_stripe(monkeypatch):
 
     retrieve.assert_called_once_with("cs_test_123")
     assert result.id == "cs_test_123"
+
+
+class FakeLineItem:
+    def __init__(self, data):
+        self._data = data
+
+    def to_dict(self):
+        return self._data
+
+
+class FakeLineItems:
+    def __init__(self, data):
+        self.data = data
+
+
+def test_get_checkout_lines_uses_stripe_sdk(monkeypatch):
+    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_fake")
+    list_line_items = Mock(return_value=FakeLineItems([
+        FakeLineItem({"description": "Test room", "amount_total": 20000}),
+    ]))
+    monkeypatch.setattr(
+        "services.stripe.stripe.checkout.Session.list_line_items",
+        list_line_items,
+    )
+
+    result = get_checkout_lines("cs_test_123")
+
+    list_line_items.assert_called_once_with("cs_test_123")
+    assert result == [{"description": "Test room", "amount_total": 20000}]
+
+
+def test_booking_details_do_not_expose_checkout_session_id(client, monkeypatch):
+    body, _, _ = create_booking(client, monkeypatch)
+
+    response = client.get(f"/bookings/{body['reference']}")
+
+    assert response.status_code == 200
+    assert "stripe_checkout_session_id" not in response.get_json()
+
+
+def test_checkout_lines_uses_stored_session_id(app, client, monkeypatch):
+    body, session, _ = create_booking(client, monkeypatch)
+    with app.app_context():
+        booking = Booking.query.filter_by(reference=body["reference"]).one()
+        booking.is_paid = True
+        db.session.commit()
+
+    calls = []
+
+    def fake_get_checkout_lines(session_id):
+        calls.append(session_id)
+        return [{"description": "Test room", "amount_total": 20000}]
+
+    monkeypatch.setattr(
+        "api.bookings.bookings_api.get_checkout_lines",
+        fake_get_checkout_lines,
+    )
+
+    response = client.get(
+        f"/bookings/{body['reference']}/checkout-lines"
+        "?checkout_session_id=cs_test_attacker_controlled"
+    )
+
+    assert response.status_code == 200
+    assert calls == [session.id]
+    assert response.get_json() == [{"description": "Test room", "amount_total": 20000}]
+
+
+def test_checkout_lines_requires_payment(client, monkeypatch):
+    body, _, _ = create_booking(client, monkeypatch)
+    get_lines = Mock()
+    monkeypatch.setattr(
+        "api.bookings.bookings_api.get_checkout_lines",
+        get_lines,
+    )
+
+    response = client.get(f"/bookings/{body['reference']}/checkout-lines")
+
+    assert response.status_code == 422
+    get_lines.assert_not_called()
+
+
+def test_checkout_lines_returns_502_when_stripe_fails(app, client, monkeypatch):
+    body, _, _ = create_booking(client, monkeypatch)
+    with app.app_context():
+        booking = Booking.query.filter_by(reference=body["reference"]).one()
+        booking.is_paid = True
+        db.session.commit()
+
+    def failing_get_checkout_lines(session_id):
+        raise RuntimeError("Stripe is unavailable")
+
+    monkeypatch.setattr(
+        "api.bookings.bookings_api.get_checkout_lines",
+        failing_get_checkout_lines,
+    )
+
+    response = client.get(f"/bookings/{body['reference']}/checkout-lines")
+
+    assert response.status_code == 502
