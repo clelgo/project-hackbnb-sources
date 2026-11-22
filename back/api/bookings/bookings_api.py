@@ -1,7 +1,8 @@
-import time
 import hashlib
-import string
+import hmac
 import random
+import secrets
+import string
 from datetime import date
 from flask import jsonify, Blueprint, request
 
@@ -90,9 +91,13 @@ def new_booking():
     # Generate random booking reference
     booking_reference = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
-    # Generate random confirmation secret
-    random_string = str(int(time.time())) # get current timestamp in seconds
-    checkout_confirmation_secret = hashlib.sha512(random_string.encode('utf-8')).hexdigest() # hash it with safe sha512
+    # Generate an unpredictable confirmation secret.
+    # It must not be derivable from public information such as the current time.
+    confirmation_secret = secrets.token_urlsafe(32)
+
+    # Store only a hash of the secret, so that a database leak does not expose
+    # the value required to confirm the booking.
+    checkout_confirmation_secret_hash = hashlib.sha256(confirmation_secret.encode('utf-8')).hexdigest()
 
     # Create Stripe checkout session
     checkout_session = create_checkout(
@@ -100,7 +105,7 @@ def new_booking():
         name=f"{booking_duration_in_days} nuit{'s' if booking_duration_in_days > 1 else ''} à {room.title} ({room.city})",
         unit_price=room.price,
         quantity=booking_duration_in_days,
-        confirmation_secret=checkout_confirmation_secret,
+        confirmation_secret=confirmation_secret,
     )
 
     # Create booking
@@ -110,7 +115,7 @@ def new_booking():
         departure_date=request.json["departureDate"],
         guests_count=guests_count,
         total_price=booking_price,
-        checkout_confirmation_secret=checkout_confirmation_secret,
+        checkout_confirmation_secret=checkout_confirmation_secret_hash,
         stripe_checkout_session_id=checkout_session.id,
         is_paid=False,
         room_id=room.id,
@@ -135,7 +140,13 @@ def confirm_booking_checkout(reference: str):
     if not booking:
         return {'error': 'Booking not found'}, 404
     
-    if booking.checkout_confirmation_secret != request.json["confirmationSecret"]:
+    payload = request.get_json(silent=True)
+    confirmation_secret = payload.get("confirmationSecret") if isinstance(payload, dict) else None
+    if not isinstance(confirmation_secret, str) or not confirmation_secret:
+        return {'error': 'Invalid confirmation secret'}, 422
+
+    provided_secret_hash = hashlib.sha256(confirmation_secret.encode('utf-8')).hexdigest()
+    if not hmac.compare_digest(booking.checkout_confirmation_secret, provided_secret_hash):
         return {'error': 'Invalid confirmation secret'}, 422
 
     booking.is_paid = True
