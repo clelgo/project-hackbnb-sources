@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import random
 import secrets
 import string
 from datetime import date
@@ -88,8 +87,10 @@ def new_booking():
     # Determine the booking total price
     booking_price = room.price * booking_duration_in_days
 
-    # Generate random booking reference
-    booking_reference = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+    # Generate an unpredictable booking reference using a CSPRNG.
+    # The reference is a public identifier, but it must not be guessable from
+    # previous references (Mersenne Twister output is predictable).
+    booking_reference = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
     # Generate an unpredictable confirmation secret.
     # It must not be derivable from public information such as the current time.

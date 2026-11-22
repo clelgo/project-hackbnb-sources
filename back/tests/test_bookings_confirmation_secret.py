@@ -1,4 +1,8 @@
 import hashlib
+import random
+import re
+import secrets
+import string
 import time
 
 import pytest
@@ -110,6 +114,39 @@ def test_confirmation_secret_is_random_and_not_timestamp_based(app, client, monk
     # Two bookings must never share the same secret.
     _, other_secret = create_booking(client, monkeypatch)
     assert other_secret != secret
+
+
+def test_booking_reference_uses_csprng(client, monkeypatch):
+    def forbidden_random_choice(*args, **kwargs):
+        raise AssertionError("random.choice must not be used for booking references")
+
+    monkeypatch.setattr(random, "choice", forbidden_random_choice)
+
+    calls = []
+    original_secrets_choice = secrets.choice
+
+    def recording_secrets_choice(alphabet):
+        calls.append(alphabet)
+        return original_secrets_choice(alphabet)
+
+    monkeypatch.setattr(secrets, "choice", recording_secrets_choice)
+
+    body, _ = create_booking(client, monkeypatch)
+
+    expected_alphabet = string.ascii_uppercase + string.digits
+    assert len(calls) == 8
+    assert all(alphabet == expected_alphabet for alphabet in calls)
+    assert re.fullmatch(r"[A-Z0-9]{8}", body["reference"])
+
+
+def test_booking_reference_format_and_uniqueness(client, monkeypatch):
+    references = {
+        create_booking(client, monkeypatch)[0]["reference"]
+        for _ in range(10)
+    }
+
+    assert len(references) == 10
+    assert all(re.fullmatch(r"[A-Z0-9]{8}", reference) for reference in references)
 
 
 def test_confirm_checkout_rejects_wrong_secret(app, client, monkeypatch):
