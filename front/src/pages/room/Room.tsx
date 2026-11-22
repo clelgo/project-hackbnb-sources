@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react"
+import axios from "axios"
 import { apiRoomDetails } from "../../api/rooms.api"
 import type { Room } from "../../types/room"
 import { useParams } from "react-router-dom"
 import { apiBookingNew } from "../../api/bookings.api"
+import { isAllowedStripeCheckoutUrl } from "../../utils/checkoutUrl"
 
 /**
  * The page of a room details
@@ -28,10 +30,19 @@ export const RoomPage = () => {
 
         try {
             const res = await apiBookingNew(roomId!, arrivalDate, departureDate, guestsCount)
+            const checkoutUrl = res.data.checkout_url
+            if (!isAllowedStripeCheckoutUrl(checkoutUrl)) {
+                alert('URL de paiement invalide.')
+                return false
+            }
+
             alert('Pour tester le paiement, utilisez :\n- numéro de CB : 4242 4242 4242 4242\n- expire : 12/25\n- CVC : 123')
-            window.open(res.data.checkout_url, "_blank")
+            window.open(checkoutUrl, "_blank", "noopener,noreferrer")
         } catch (error) {
-            alert((error as any).response?.data?.error || 'Une erreur est survenue, la clé API Stripe est-elle correcte ?')
+            const apiError = axios.isAxiosError<{ error?: string }>(error)
+                ? error.response?.data?.error
+                : undefined
+            alert(apiError || 'Une erreur est survenue, la clé API Stripe est-elle correcte ?')
         }
 
         return false
