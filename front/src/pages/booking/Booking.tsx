@@ -10,7 +10,7 @@ export const BookingPage = () => {
     const { bookingId } = useParams()
     const [booking, setBooking] = useState<Booking>()
     const [checkoutLines, setCheckoutLines] = useState<any>([])
-    const [searchParams, _] = useSearchParams()
+    const [searchParams, setSearchParams] = useSearchParams()
 
     const reloadBookingDetails = async () => {
         const response = await apiBookingDetails(`${bookingId}`)
@@ -20,15 +20,19 @@ export const BookingPage = () => {
         setCheckoutLines(response2.data)
     }
 
-    const confirmBookingCheckout = async (confirmationSecret: string) => {
-        await apiBookingConfirm(`${bookingId}`, confirmationSecret)
+    const confirmBookingCheckout = async (checkoutSessionId: string) => {
+        await apiBookingConfirm(`${bookingId}`, checkoutSessionId)
+        // The session ID is not a secret, but there is no reason to keep it
+        // in the URL/history once the payment has been confirmed.
+        setSearchParams({}, { replace: true })
         await reloadBookingDetails()
     }
 
     useEffect(() => {
         // Mark booking as paid in API
-        if (searchParams.has("checkout_confirmation_secret")) {
-            confirmBookingCheckout(searchParams.get("checkout_confirmation_secret")!)
+        const checkoutSessionId = searchParams.get("checkout_session_id")
+        if (checkoutSessionId) {
+            confirmBookingCheckout(checkoutSessionId)
         } else {
             reloadBookingDetails()
         }

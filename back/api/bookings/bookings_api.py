@@ -1,4 +1,3 @@
-import hashlib
 import hmac
 import secrets
 import string
@@ -7,7 +6,7 @@ from flask import jsonify, Blueprint, request
 
 from database.init import db
 from api.rooms.rooms_models import Room
-from services.stripe import create_checkout, get_checkout_lines
+from services.stripe import create_checkout, get_checkout_lines, get_checkout_session
 from .bookings_models import Booking
 from sqlalchemy.orm import joinedload
 
@@ -92,21 +91,12 @@ def new_booking():
     # previous references (Mersenne Twister output is predictable).
     booking_reference = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
-    # Generate an unpredictable confirmation secret.
-    # It must not be derivable from public information such as the current time.
-    confirmation_secret = secrets.token_urlsafe(32)
-
-    # Store only a hash of the secret, so that a database leak does not expose
-    # the value required to confirm the booking.
-    checkout_confirmation_secret_hash = hashlib.sha256(confirmation_secret.encode('utf-8')).hexdigest()
-
     # Create Stripe checkout session
     checkout_session = create_checkout(
         reference=booking_reference,
         name=f"{booking_duration_in_days} nuit{'s' if booking_duration_in_days > 1 else ''} à {room.title} ({room.city})",
         unit_price=room.price,
         quantity=booking_duration_in_days,
-        confirmation_secret=confirmation_secret,
     )
 
     # Create booking
@@ -116,7 +106,6 @@ def new_booking():
         departure_date=request.json["departureDate"],
         guests_count=guests_count,
         total_price=booking_price,
-        checkout_confirmation_secret=checkout_confirmation_secret_hash,
         stripe_checkout_session_id=checkout_session.id,
         is_paid=False,
         room_id=room.id,
@@ -142,13 +131,27 @@ def confirm_booking_checkout(reference: str):
         return {'error': 'Booking not found'}, 404
     
     payload = request.get_json(silent=True)
-    confirmation_secret = payload.get("confirmationSecret") if isinstance(payload, dict) else None
-    if not isinstance(confirmation_secret, str) or not confirmation_secret:
-        return {'error': 'Invalid confirmation secret'}, 422
+    checkout_session_id = payload.get("checkoutSessionId") if isinstance(payload, dict) else None
+    if not isinstance(checkout_session_id, str) or not checkout_session_id:
+        return {'error': 'Invalid checkout session ID'}, 422
 
-    provided_secret_hash = hashlib.sha256(confirmation_secret.encode('utf-8')).hexdigest()
-    if not hmac.compare_digest(booking.checkout_confirmation_secret, provided_secret_hash):
-        return {'error': 'Invalid confirmation secret'}, 422
+    # The session ID must be the one created for this booking.
+    if not booking.stripe_checkout_session_id or not hmac.compare_digest(
+        booking.stripe_checkout_session_id, checkout_session_id
+    ):
+        return {'error': 'Invalid checkout session ID'}, 422
+
+    # Never trust the client: ask Stripe whether the session was actually paid.
+    try:
+        checkout_session = get_checkout_session(checkout_session_id)
+    except Exception:
+        return {'error': 'Unable to verify checkout session'}, 502
+
+    if getattr(checkout_session, 'payment_status', None) != 'paid':
+        return {'error': 'Payment not completed'}, 422
+
+    if getattr(checkout_session, 'client_reference_id', None) != booking.reference:
+        return {'error': 'Checkout session does not match booking'}, 422
 
     booking.is_paid = True
     db.session.commit()
