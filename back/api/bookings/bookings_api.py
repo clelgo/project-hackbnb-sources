@@ -1,3 +1,4 @@
+import hmac
 import secrets
 import string
 from datetime import date
@@ -5,7 +6,7 @@ from flask import jsonify, Blueprint, request
 
 from database.init import db
 from api.rooms.rooms_models import Room
-from services.stripe import StripeError, create_checkout, get_checkout_lines, get_checkout_session
+from services.stripe import create_checkout, get_checkout_lines, get_checkout_session
 from .bookings_models import Booking
 from sqlalchemy.orm import joinedload
 
@@ -38,10 +39,15 @@ def get_booking_checkout_lines(reference: str):
     if not booking.is_paid:
         return {'error': 'Cannot get checkout lines without payment'}, 422
 
+    if not booking.stripe_checkout_session_id:
+        return {'error': 'Missing checkout session'}, 422
+
     try:
+        # Never use a session ID supplied by the client: only the one created
+        # for this booking is allowed.
         return jsonify(get_checkout_lines(booking.stripe_checkout_session_id))
-    except StripeError:
-        return {'error': 'Unable to retrieve checkout lines'}, 502
+    except Exception:
+        return {'error': 'Unable to get checkout lines'}, 502
 
 
 @bookings_api.route('/', methods=['POST'])
@@ -84,11 +90,10 @@ def new_booking():
     # Determine the booking total price
     booking_price = room.price * booking_duration_in_days
 
-    # Generate a non-predictable booking reference
+    # Generate an unpredictable booking reference using a CSPRNG.
+    # The reference is a public identifier, but it must not be guessable from
+    # previous references (Mersenne Twister output is predictable).
     booking_reference = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-
-    # Legacy column (NOT NULL) kept for compatibility, no longer used to authenticate
-    checkout_confirmation_secret = secrets.token_urlsafe(32)
 
     # Create Stripe checkout session
     checkout_session = create_checkout(
@@ -105,7 +110,6 @@ def new_booking():
         departure_date=request.json["departureDate"],
         guests_count=guests_count,
         total_price=booking_price,
-        checkout_confirmation_secret=checkout_confirmation_secret,
         stripe_checkout_session_id=checkout_session.id,
         is_paid=False,
         room_id=room.id,
@@ -129,28 +133,29 @@ def confirm_booking_checkout(reference: str):
     booking = Booking.query.filter_by(reference=reference).first()
     if not booking:
         return {'error': 'Booking not found'}, 404
+    
+    payload = request.get_json(silent=True)
+    checkout_session_id = payload.get("checkoutSessionId") if isinstance(payload, dict) else None
+    if not isinstance(checkout_session_id, str) or not checkout_session_id:
+        return {'error': 'Invalid checkout session ID'}, 422
 
-    # Already confirmed: idempotent
-    if booking.is_paid:
-        return jsonify({"success": True})
+    # The session ID must be the one created for this booking.
+    if not booking.stripe_checkout_session_id or not hmac.compare_digest(
+        booking.stripe_checkout_session_id, checkout_session_id
+    ):
+        return {'error': 'Invalid checkout session ID'}, 422
 
-    checkout_session_id = (request.json or {}).get("checkoutSessionId")
-    if not checkout_session_id:
-        return {'error': 'Missing checkout session ID'}, 400
-
-    # The only source of truth is Stripe
+    # Never trust the client: ask Stripe whether the session was actually paid.
     try:
-        session = get_checkout_session(checkout_session_id)
-    except StripeError:
-        return {'error': 'Invalid checkout session'}, 422
+        checkout_session = get_checkout_session(checkout_session_id)
+    except Exception:
+        return {'error': 'Unable to verify checkout session'}, 502
 
-    # The session must belong to this exact booking
-    if session.id != booking.stripe_checkout_session_id:
-        return {'error': 'Checkout session does not match this booking'}, 422
-
-    # And it must be really paid
-    if session.status != 'complete' or session.payment_status != 'paid':
+    if getattr(checkout_session, 'payment_status', None) != 'paid':
         return {'error': 'Payment not completed'}, 422
+
+    if getattr(checkout_session, 'client_reference_id', None) != booking.reference:
+        return {'error': 'Checkout session does not match booking'}, 422
 
     booking.is_paid = True
     db.session.commit()

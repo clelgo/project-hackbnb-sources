@@ -10,23 +10,26 @@ export const BookingPage = () => {
     const { bookingId } = useParams()
     const [booking, setBooking] = useState<Booking>()
     const [checkoutLines, setCheckoutLines] = useState<any>([])
-    const [searchParams, _] = useSearchParams()
+    const [searchParams, setSearchParams] = useSearchParams()
 
     const reloadBookingDetails = async () => {
         const response = await apiBookingDetails(`${bookingId}`)
         setBooking(response.data)
 
-        const response2 = await apiBookingCheckoutLines(`${bookingId}`, response.data.stripe_checkout_session_id)
+        const response2 = await apiBookingCheckoutLines(`${bookingId}`)
         setCheckoutLines(response2.data)
     }
 
     const confirmBookingCheckout = async (checkoutSessionId: string) => {
         await apiBookingConfirm(`${bookingId}`, checkoutSessionId)
+        // The session ID is not a secret, but there is no reason to keep it
+        // in the URL/history once the payment has been confirmed.
+        setSearchParams({}, { replace: true })
         await reloadBookingDetails()
     }
 
     useEffect(() => {
-        // Mark booking as paid in API (Stripe session id returned in success_url)
+        // Mark booking as paid in API
         const checkoutSessionId = searchParams.get("checkout_session_id")
         if (checkoutSessionId) {
             confirmBookingCheckout(checkoutSessionId)
@@ -47,7 +50,7 @@ export const BookingPage = () => {
 
                     <h2 className="mt-4 text-md text-gray-300">Hôte : {booking.room.host?.name}</h2>
 
-                    <div className="mt-8" dangerouslySetInnerHTML={{__html: booking.room.description}}></div>
+                    <div className="mt-8">{booking.room.description}</div>
 
                     <div className="m-auto mt-10 rounded-3xl p-8 border-1 border-gray-300">
                         <h2 className="text-xl">

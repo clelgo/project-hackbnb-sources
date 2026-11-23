@@ -10,8 +10,8 @@ export const apiBookingDetails = (bookingReference: string) => {
 /**
  * Get booking checkout lines from API
  */
-export const apiBookingCheckoutLines = (bookingReference: string, checkoutSessionId: string) => {
-    return axios.get(`/bookings/${encodeURIComponent(bookingReference)}/checkout-lines?checkout_session_id=${encodeURIComponent(checkoutSessionId)}`)
+export const apiBookingCheckoutLines = (bookingReference: string) => {
+    return axios.get(`/bookings/${encodeURIComponent(bookingReference)}/checkout-lines`)
 }
 
 /**
@@ -25,5 +25,5 @@ export const apiBookingNew = (roomId: string, arrivalDate: string, departureDate
  * Confirm checkout payment of a new booking
  */
 export const apiBookingConfirm = (bookingReference: string, checkoutSessionId: string) => {
-    return axios.post(`/bookings/${encodeURIComponent(bookingReference)}/confirm-checkout`, { checkoutSessionId })
+    return axios.post(`/bookings/${bookingReference}/confirm-checkout`, { checkoutSessionId })
 }
