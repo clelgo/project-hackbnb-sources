@@ -2,7 +2,13 @@
 
 HackBNB est une plateforme en ligne permettant à des professionnels de la cybersécurité de trouver des lieux de séjour adaptés à leurs activités, dans un cadre légal et communautaire.
 
-Pour démarrer le projet en local, utiliser :
+Pour démarrer le projet en local renseigner la clé secrète Stripe dans .env.dev :
+
+```bash
+cp .env.dev .env
+```
+
+puis lancer :
 ```bash
 docker compose up
 ```
