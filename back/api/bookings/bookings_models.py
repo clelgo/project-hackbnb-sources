@@ -11,7 +11,9 @@ class Booking(db.Model):
     departure_date: Mapped[str] = mapped_column()
     guests_count: Mapped[int] = mapped_column()
     total_price: Mapped[float] = mapped_column()
-    checkout_confirmation_secret: Mapped[str] = mapped_column()
+    # Legacy column kept for compatibility with existing databases.
+    # Payment confirmation now uses the Stripe Checkout session ID.
+    checkout_confirmation_secret: Mapped[str] = mapped_column(default="")
     stripe_checkout_session_id: Mapped[str] = mapped_column(index=True)
     is_paid: Mapped[bool] = mapped_column()
     room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id"), index=True)
@@ -29,7 +31,6 @@ class Booking(db.Model):
             "departure_date": self.departure_date,
             "guests_count": self.guests_count,
             "total_price": self.total_price,
-            "stripe_checkout_session_id": self.stripe_checkout_session_id,
         }
 
         if self.room:
