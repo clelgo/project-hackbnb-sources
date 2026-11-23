@@ -32,6 +32,7 @@ class Room(db.Model):
         }
 
         if self.host_user:
-            output["host"] = self.host_user.to_dict()
+            # Public view only: the host's e-mail must not leak through the API (D5).
+            output["host"] = self.host_user.to_public_dict()
 
         return output

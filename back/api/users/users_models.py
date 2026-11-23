@@ -22,6 +22,12 @@ class User(db.Model):
             "email": self.email,
         }
 
+    def to_public_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+        }
+
     def set_password(self, clear_password: str):
         self.password_hash = generate_password_hash(clear_password)
     
