@@ -24,6 +24,6 @@ export const apiBookingNew = (roomId: string, arrivalDate: string, departureDate
 /**
  * Confirm checkout payment of a new booking
  */
-export const apiBookingConfirm = (bookingReference: string, confirmationSecret: string) => {
-    return axios.post(`/bookings/${bookingReference}/confirm-checkout`, { confirmationSecret })
+export const apiBookingConfirm = (bookingReference: string, checkoutSessionId: string) => {
+    return axios.post(`/bookings/${encodeURIComponent(bookingReference)}/confirm-checkout`, { checkoutSessionId })
 }

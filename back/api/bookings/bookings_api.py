@@ -1,13 +1,11 @@
-import time
-import hashlib
+import secrets
 import string
-import random
 from datetime import date
 from flask import jsonify, Blueprint, request
 
 from database.init import db
 from api.rooms.rooms_models import Room
-from services.stripe import create_checkout, get_checkout_lines
+from services.stripe import StripeError, create_checkout, get_checkout_lines, get_checkout_session
 from .bookings_models import Booking
 from sqlalchemy.orm import joinedload
 
@@ -41,10 +39,9 @@ def get_booking_checkout_lines(reference: str):
         return {'error': 'Cannot get checkout lines without payment'}, 422
 
     try:
-        checkout_session_id = request.args.get("checkout_session_id")
-        return jsonify(get_checkout_lines(checkout_session_id))
-    except:
-        return {'error': 'Invalid checkout session ID'}, 404
+        return jsonify(get_checkout_lines(booking.stripe_checkout_session_id))
+    except StripeError:
+        return {'error': 'Unable to retrieve checkout lines'}, 502
 
 
 @bookings_api.route('/', methods=['POST'])
@@ -87,12 +84,11 @@ def new_booking():
     # Determine the booking total price
     booking_price = room.price * booking_duration_in_days
 
-    # Generate random booking reference
-    booking_reference = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+    # Generate a non-predictable booking reference
+    booking_reference = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
-    # Generate random confirmation secret
-    random_string = str(int(time.time())) # get current timestamp in seconds
-    checkout_confirmation_secret = hashlib.sha512(random_string.encode('utf-8')).hexdigest() # hash it with safe sha512
+    # Legacy column (NOT NULL) kept for compatibility, no longer used to authenticate
+    checkout_confirmation_secret = secrets.token_urlsafe(32)
 
     # Create Stripe checkout session
     checkout_session = create_checkout(
@@ -100,7 +96,6 @@ def new_booking():
         name=f"{booking_duration_in_days} nuit{'s' if booking_duration_in_days > 1 else ''} à {room.title} ({room.city})",
         unit_price=room.price,
         quantity=booking_duration_in_days,
-        confirmation_secret=checkout_confirmation_secret,
     )
 
     # Create booking
@@ -134,9 +129,28 @@ def confirm_booking_checkout(reference: str):
     booking = Booking.query.filter_by(reference=reference).first()
     if not booking:
         return {'error': 'Booking not found'}, 404
-    
-    if booking.checkout_confirmation_secret != request.json["confirmationSecret"]:
-        return {'error': 'Invalid confirmation secret'}, 422
+
+    # Already confirmed: idempotent
+    if booking.is_paid:
+        return jsonify({"success": True})
+
+    checkout_session_id = (request.json or {}).get("checkoutSessionId")
+    if not checkout_session_id:
+        return {'error': 'Missing checkout session ID'}, 400
+
+    # The only source of truth is Stripe
+    try:
+        session = get_checkout_session(checkout_session_id)
+    except StripeError:
+        return {'error': 'Invalid checkout session'}, 422
+
+    # The session must belong to this exact booking
+    if session.id != booking.stripe_checkout_session_id:
+        return {'error': 'Checkout session does not match this booking'}, 422
+
+    # And it must be really paid
+    if session.status != 'complete' or session.payment_status != 'paid':
+        return {'error': 'Payment not completed'}, 422
 
     booking.is_paid = True
     db.session.commit()

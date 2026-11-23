@@ -20,15 +20,16 @@ export const BookingPage = () => {
         setCheckoutLines(response2.data)
     }
 
-    const confirmBookingCheckout = async (confirmationSecret: string) => {
-        await apiBookingConfirm(`${bookingId}`, confirmationSecret)
+    const confirmBookingCheckout = async (checkoutSessionId: string) => {
+        await apiBookingConfirm(`${bookingId}`, checkoutSessionId)
         await reloadBookingDetails()
     }
 
     useEffect(() => {
-        // Mark booking as paid in API
-        if (searchParams.has("checkout_confirmation_secret")) {
-            confirmBookingCheckout(searchParams.get("checkout_confirmation_secret")!)
+        // Mark booking as paid in API (Stripe session id returned in success_url)
+        const checkoutSessionId = searchParams.get("checkout_session_id")
+        if (checkoutSessionId) {
+            confirmBookingCheckout(checkoutSessionId)
         } else {
             reloadBookingDetails()
         }
